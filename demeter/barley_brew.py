@@ -1,7 +1,8 @@
 import os
 import sys
 import glob
-import itertools
+
+from matplotlib import pyplot as plt
 
 import scipy.ndimage as ndimage
 import scipy.spatial as spatial
@@ -9,6 +10,8 @@ import numpy as np
 import pandas as pd
 
 import tifffile as tf
+
+from .misc import clean_zeroes
 
 def normalize_density(img, adjust_by):
     resol = 2**(img.dtype.itemsize*8)
@@ -47,30 +50,6 @@ def misc_cleaning(img, sigma=3, thr1=55, ero=(7,7,7), dil=(5,5,5), thr2=30, op=(
 
     img[blur < thr2-10] = 0
     img = clean_zeroes(img)
-
-    return img
-
-def clean_zeroes(img):
-    dim = img.ndim
-    orig_size = img.size
-
-    cero = list(range(2*dim))
-
-    for k in range(dim):
-        ceros = np.all(img == 0, axis = (k, (k+1)%dim))
-
-        for i in range(len(ceros)):
-            if(~ceros[i]):
-                break
-        for j in range(len(ceros)-1, 0, -1):
-            if(~ceros[j]):
-                break
-        cero[k] = i
-        cero[k+dim] = j+1
-
-    img = img[cero[1]:cero[4], cero[2]:cero[5], cero[0]:cero[3]]
-
-    print(round(100-100*img.size/orig_size),'% reduction from input')
 
     return img
 
@@ -134,6 +113,126 @@ def separate_pruned_spikes(dst, bname, img, cutoff = 1e-2, flex=2):
             tf.imwrite('{}{}_l{}_x{}_y{}_z{}.tif'.format(dst,bname,j,x0,y0,z0),box,photometric='minisblack',compress=3)
 
     return 0
+
+#######################################################################
+#######################################################################
+#######################################################################
+
+def read_boxes(src):
+    barley_files = sorted(glob.glob(src + '*.tif'))
+    spikes = len(barley_files)
+
+    if spikes > 5 or spikes < 2:
+        print('Found',spikes,'connected components. Expected between 2 and 5. Aborting.')
+        sys.exit(0)
+
+    img = dict()
+    for i in range(spikes):
+        fname = os.path.split(barley_files[i])[1]
+        img[fname] = tf.imread(barley_files[i])
+
+    boxes = dict()
+    for fname in img:
+        coords = []
+        fields = os.path.splitext(fname)[0].split('_')
+        for f in fields:
+            if f[0] in 'lxyz':
+                coords.append(f[1:])
+        coords = np.array(coords, dtype='int')
+        d,h,w = img[fname].shape
+        boxes[fname] = (coords[1], coords[2], coords[3], w,h,d, coords[0])
+
+    marker = os.path.split(barley_files[-1])[1]
+
+    return img, boxes, marker
+
+def find_centers(img, boxes, slices=10):
+    dcoords = dict()
+    acoords = np.empty((len(boxes), 2), dtype=np.float64, order='C')
+    for idx,fname in enumerate(boxes):
+        xyzcoords = np.nonzero(img[fname][slices,:,:])
+        xyzcoords = np.vstack(xyzcoords).T
+        foo = np.round(np.mean(xyzcoords, axis=0))
+        foo = np.add(foo, np.array([boxes[fname][1], boxes[fname][0]]))
+        acoords[idx, :] = foo
+        dcoords[fname] = foo
+
+    return acoords, dcoords
+
+def euclidean_dists(centers, marker):
+    dummy = dict(zip(centers.keys(), range(len(centers))))
+    m_coord = centers[marker]
+    euclidean = dict()
+    del dummy[marker]
+
+    for fname in dummy:
+        euclidean[fname] = np.sqrt(np.sum((m_coord - centers[fname])**2))
+
+    return euclidean
+
+
+def coloring_spikes(dcenters, euclidean, hull, col_name = ['Red', 'Green', 'Orange', 'Blue']):
+    colors = dict()
+    red = min(euclidean, key=lambda key: euclidean[key])
+    colors[red] = col_name[0]
+
+    foo = hull.points[hull.vertices]
+
+    idx_r = 0
+    for i in range(foo.shape[0]):
+        if np.sum(dcenters[red] == foo[i]) == foo.shape[1]:
+            idx_r = i
+
+    for i in range(1,foo.shape[0]):
+        for fname,xy in dcenters.items():
+            if np.sum(xy == foo[(idx_r+i)%foo.shape[0]]) == foo.shape[1]:
+                colors[fname] = col_name[i]
+
+    return colors
+
+def render_alignment(dst, sname, boxes, colors, write_fig=False):
+    fig = plt.figure(figsize=(10,6))
+    fig.suptitle(sname, fontsize=25)
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.view_init(elev=80., azim=40)
+
+    for fname in boxes:
+        x,y,z,w,h,d,l = boxes[fname]
+        cx,cy = x+w/2,y+h/2
+        ax.plot([x,x,x,x,x+w,x+w,x+w,x+w,x],[y,y,y+h,y+h,y+h,y+h,y,y,y],[z,z+d,z+d,z,z,z+d,z+d,z,z],c=colors[fname].lower())
+        ax.text(x+w/2,y+h/2,z+d,'{} {}'.format('L', l),None, color=colors[fname].lower(), ha='center', va='center')
+
+    if write_fig:
+        plt.savefig(dst+sname+'_alignment.jpg', dpi=150, format='jpg', pil_kwargs={'optimize':True})
+
+def barley_labeling(src, dst, rename=True):
+    img,boxes,marker = read_boxes(src)
+
+    centers,dcenters = find_centers(img, boxes)
+    hull = spatial.ConvexHull(centers[:-1,:])
+
+    if len(hull.vertices) != 4:
+        print(src,'\nConvex Hull reports less than 4 spikes!!!.')
+        sys.exit(0)
+
+    euclidean = euclidean_dists(dcenters, marker)
+    colors = coloring_spikes(dcenters, euclidean, hull)
+    colors[marker] = 'Black'
+
+    sname = marker.split('_')[0]
+    render_alignment(dst, sname, boxes,colors)
+    braces = '{}_'
+
+    if rename:
+        for fname in colors:
+            splt = fname.split('_')
+            cname = braces*len(splt) + '{}'
+            cname = cname.format(sname,splt[1],colors[fname],*(splt[2:]))
+            os.rename(src + fname, src + cname)
+
+    return dst, sname, boxes, colors
+
 
 #######################################################################
 #######################################################################
@@ -228,7 +327,7 @@ def refine_pesky_seeds(dst, img, cutoff=1e-2, opening=7, write_tif=False, median
         for j in range(len(regions)):
             i = argsort_hist[j]
             r = regions[i]
-            if (hist[i]/sz_hist > cutoff) and (math.fabs(hist[i] - median) < tol*med_range):
+            if (hist[i]/sz_hist > cutoff) and (np.fabs(hist[i] - median) < tol*med_range):
                 z0,y0,x0,z1,y1,x1 = r[0].start,r[1].start,r[2].start,r[0].stop,r[1].stop,r[2].stop
                 mask = labels[r]==i+1
                 box = img[r].copy()
@@ -242,7 +341,7 @@ def refine_pesky_seeds(dst, img, cutoff=1e-2, opening=7, write_tif=False, median
 
                 print('---\n')
 
-            elif math.fabs(hist[i] - median) >= tol*med_range:
+            elif np.fabs(hist[i] - median) >= tol*med_range:
                 print('seed', bname,'_',j,' is too large/small.')
                 split_further = True
 
@@ -444,77 +543,27 @@ def seed_isolation(src, figdst, fname, cutoff=1e-2, threshold = 200, med_tol=0.5
 
     return locs, sizes, start_seed, end_seed, to_ignore
 
-#######################################################################
-#######################################################################
-#######################################################################
 
-def read_boxes(src):
-    barley_files = sorted(glob.glob(src + '*.tif'))
-    spikes = len(barley_files)
+def missing_summary(scanId, color, locs, sizes, to_ignore):
+    missing_seed = np.zeros((len(to_ignore), 4), np.float32)
 
-    if spikes > 5 or spikes < 2:
-        print('Found',spikes,'connected components. Expected between 2 and 5. Aborting.')
-        sys.exit(0)
+    for i in range(len(to_ignore)):
+        missing_seed[i, :] = [to_ignore[i],
+                              locs[to_ignore[i]][0] + 0.5*sizes[to_ignore[i]][0],
+                              locs[to_ignore[i]][1] + 0.5*sizes[to_ignore[i]][1],
+                              locs[to_ignore[i]][2] + 0.5*sizes[to_ignore[i]][2]]
 
-    img = dict()
-    for i in range(spikes):
-        fname = os.path.split(barley_files[i])[1]
-        img[fname] = tf.imread(barley_files[i])
+    bar = (pd.DataFrame([scanId, color])).T
+    bar.columns = ['scan', 'color']
+    bar = pd.concat([bar]*len(to_ignore))
+    bar.index = list(range(len(to_ignore)))
 
-    boxes = dict()
-    for fname in img:
-        coords = []
-        fields = os.path.splitext(fname)[0].split('_')
-        for f in fields:
-            if f[0] in 'lxyz':
-                coords.append(f[1:])
-        coords = np.array(coords, dtype='int')
-        d,h,w = img[fname].shape
-        boxes[fname] = (coords[1], coords[2], coords[3], w,h,d, coords[0])
+    df = pd.DataFrame(missing_seed, columns=['seedNo', 'centerX', 'centerY', 'centerZ'])
 
-    marker = os.path.split(barley_files[-1])[1]
+    foo = pd.merge(bar,df, left_index=True, right_index=True).astype({'seedNo': 'uint8'})
 
-    return img, boxes, marker
+    return foo
 
 #######################################################################
 #######################################################################
 #######################################################################
-
-def find_tip(coords, x,y,z):
-    maxes = np.max(coords, axis=0)
-    max_vox = coords[coords[:, z] == maxes[z]]
-    if len(max_vox) > 1 :
-        maxesz = np.max(max_vox, axis=0)
-        max_vox = max_vox[max_vox[:, y] == maxesz[y]]
-
-        if len(max_vox) > 1:
-            maxesy = np.max(max_vox, axis=0)
-            max_vox = max_vox[max_vox[:, x] == maxesy[x]]
-
-    return np.squeeze(max_vox)
-
-def rotateSVD(coords, max_vox, x=0,y=1,z=2):
-    u, s, vh = np.linalg.svd(coords, full_matrices=False)
-    sigma = np.sqrt(s)
-    seed = np.matmul(coords, np.transpose(vh))
-    y_pos = seed[seed[:,y] > 0]
-    y_neg = seed[seed[:,y] < 0]
-
-    y_posmax = np.max(y_pos, axis=0)
-    y_posmin = np.min(y_pos, axis=0)
-    y_negmax = np.max(y_neg, axis=0)
-    y_negmin = np.min(y_neg, axis=0)
-    hzp = np.squeeze(y_pos[y_pos[:,z]==y_posmax[z]])[y] - np.squeeze(y_neg[y_neg[:,z]==y_negmax[z]])[y]
-    hzn = np.squeeze(y_pos[y_pos[:,z]==y_posmin[z]])[y] - np.squeeze(y_neg[y_neg[:,z]==y_negmin[z]])[y]
-
-    rotZ = False
-    if hzn > hzp:
-        seed[:, z] = -1.0*seed[:, z]
-        rotZ = True
-
-    rotX = False
-    if max_vox[0] < 0:
-        seed[:, x] = -1.0*seed[:, x]
-        rotX = True
-
-    return seed, sigma, vh, rotZ, rotX
