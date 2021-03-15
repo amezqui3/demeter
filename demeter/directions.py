@@ -36,7 +36,7 @@ def pole_directions(parallels, meridians, x=0, y=1, z=2, tol=1e-10):
 
     return dirs
 
-def random_directions(dims=3, N=50, r=1):
+def random_directions(N=50, r=1, dims=3):
     rng = np.random.default_rng()
     phi = rng.uniform(0, 2*np.pi, N)
 
@@ -56,7 +56,7 @@ def random_directions(dims=3, N=50, r=1):
     else:
         print("Function implemented only for 2 and 3 dimensions")
 
-def regular_directions(dims=3, N=50, r=1):
+def regular_directions(N=50, r=1, dims=3):
     if dims==2:
         eq_angles = np.linspace(0, 2*np.pi, num=N, endpoint=False)
         return np.column_stack((np.cos(eq_angles), np.sin(eq_angles)))
@@ -83,6 +83,10 @@ def regular_directions(dims=3, N=50, r=1):
         print("Function implemented only for 2 and 3 dimensions")
 
 def plot_pole_directions(directions, titleplot = 'title', parallels=8, meridians=12, save_fig=False, dst = './', filename = 'sphere'):
+
+    if directions.shape[1] != 3:
+        print('Function implemented only for 3 dimensions')
+        return 0
 
     pdirections = pole_directions(parallels,meridians,x=1,y=0,z=2)
     viridis = cm.get_cmap('viridis', parallels*2-1)
