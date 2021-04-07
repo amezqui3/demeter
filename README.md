@@ -60,6 +60,7 @@ import demeter
     - Python scripts rather than notebooks to perform all the data processing and analysis routines. _Work in progress_.
 - `tutorials`:
     - `aatrn2021_euler_characteristic_transform.ipynb` (python) A gentle introduction to the ECT. Written originally for the [AATRN Tutorial-a-thon](https://sites.google.com/view/aatrn-tutorial-a-thon)
+    - `glbio2021_quantify_the_shape_in_biology.ipynb` (python) A gentle introduction to the ECT and `demeter`. Written originally for the [GLBIO 2021 conference](https://www.iscb.org/glbio2021).
     - `nappn2021_shape_of_things_to_come.ipynb` (python) A gentle introduction to TDA and the ECT. Written originally for the [2021 Annual Meeting of the NAPPN](https://www.nappn2021.org).
 
 ## To run locally
