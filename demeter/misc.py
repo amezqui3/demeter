@@ -18,13 +18,13 @@ def clean_zeroes(img):
     if d == 1:
         return img[zeroes[0]]
 
-    mask = np.tensordot(zeroes[-1], zeroes[-2], axes=0)
+    mask = np.tensordot(zeroes[-1], zeroes[-2], axes=0).astype('bool')
     for i in range(3,d+1):
-        mask = np.tensordot(mask, zeroes[-i], axes=0)
+        mask = np.tensordot(mask, zeroes[-i], axes=0).astype('bool')
 
     shape = tuple([np.sum(zeroes[-i]) for i in range(1,len(zeroes)+1)])
 
-    return img[mask].reshape(shape)
+    return img[mask].reshape(shape), mask, shape
 
 def find_tip(coords, x,y,z):
     maxes = np.max(coords, axis=0)
