@@ -8,8 +8,9 @@ import pandas as pd
 
 import tifffile as tf
 
-def neighborhood_setup(dimension):
+def neighborhood_setup(dimension, downsample = 1):
     neighs = sorted(list(itertools.product(range(2), repeat=dimension)), key=np.sum)[1:]
+    neighs = list(map(tuple, np.array(neighs)*downsample))
     subtuples = dict()
     for i in range(len(neighs)):
         subtup = [0]
@@ -39,12 +40,16 @@ class CubicalComplex:
     def __init__(self, img):
         self.img = img
 
-    def complexify(self, center=True):
-        coords = np.nonzero(self.img)
-        coords = np.vstack(coords).T
+    def complexify(self, center=True, downsample=1):
+        scoords = np.nonzero(self.img)
+        scoords = np.vstack(scoords).T
+
+        skip = np.zeros(self.img.ndim, dtype=int) + downsample
+        coords = scoords[np.all(np.fmod(scoords, skip) == 0, axis=1), :]
+
         keys = [tuple(coords[i,:]) for i in range(len(coords))]
         dcoords = dict(zip(keys, range(len(coords))))
-        neighs, subtuples = neighborhood_setup(self.img.ndim)
+        neighs, subtuples = neighborhood_setup(self.img.ndim, downsample)
         binom = [special.comb(self.img.ndim, k, exact=True) for k in range(self.img.ndim+1)]
 
         hood = np.zeros(len(neighs)+1, dtype=np.int)-1
@@ -140,3 +145,53 @@ class CubicalComplex:
             ect[i*T : (i+1)*T] = ecc
 
         return ect
+
+    def triangulate(self, center=True, downsample=1):
+        scoords = np.nonzero(self.img)
+        scoords = np.vstack(scoords).T
+
+        skip = np.array([downsample,downsample,downsample])
+        coords = scoords[np.all(np.fmod(scoords, skip) == 0, axis=1), :]
+
+        keys = [tuple(coords[i,:]) for i in range(len(coords))]
+        dcoords = dict(zip(keys, range(len(coords))))
+        neighs, subtuples = neighborhood_setup(self.img.ndim, downsample)
+        binom = [special.comb(self.img.ndim, k, exact=True) for k in range(self.img.ndim+1)]
+
+        hood = np.zeros(len(neighs)+1, dtype=np.int)-1
+        cells = [[] for k in range(self.img.ndim+1)]
+
+        for voxel in dcoords:
+            hood.fill(-1)
+            hood = neighborhood(voxel, neighs, hood, dcoords)
+            nhood = hood > -1
+            c = 0
+            if np.all(nhood[:-1]):
+                for k in range(1, self.img.ndim):
+                    for j in range(binom[k]):
+                        cell = hood[subtuples[neighs[c]]]
+                        cells[k].append(cell)
+                        c += 1
+                if nhood[-1]:
+                    cells[self.img.ndim].append(hood.copy())
+            else:
+                for k in range(1, self.img.ndim):
+                    for j in range(binom[k]):
+                        cell = nhood[subtuples[neighs[c]]]
+                        if np.all(cell):
+                            cells[k].append(hood[subtuples[neighs[c]]])
+                        c += 1
+
+        dim = self.img.ndim
+        for k in range(dim, -1, -1):
+            if len(cells[k]) > 0:
+                break
+
+        self.ndim = dim
+        self.cells = [np.array(cells[k]) for k in range(dim+1)]
+        if center:
+            self.cells[0] = centerVertices(coords)
+        else:
+            self.cells[0] = coords
+
+        return self
