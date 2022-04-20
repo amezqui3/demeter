@@ -36,6 +36,16 @@ def pole_directions(parallels, meridians, x=0, y=1, z=2, tol=1e-10):
 
     return dirs
 
+# //////////////////////////////////////////////////////////////////////
+# For the 3D cases, the argument laid out by
+# M Deserno "How to generate equidistributed points on
+#            the surface of a sphere"
+# https://www.cmu.edu/biolphys/deserno/pdf/sphere_equi.pdf
+#
+# was followed to define both
+# uniformly random or regular direction choice.
+# //////////////////////////////////////////////////////////////////////
+
 def random_directions(N=50, r=1, dims=3):
     rng = np.random.default_rng()
     phi = rng.uniform(0, 2*np.pi, N)
@@ -74,15 +84,16 @@ def regular_directions(N=50, r=1, dims=3):
             Mphi = np.round(2*np.pi*np.sin(theta)/dphi)
             for n in range(int(Mphi)):
                 phi = 2*np.pi*n/Mphi
-
-                dirs[i,:] = r*np.sin(theta)*np.cos(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(theta)
-                i += 1
+                # sometimes we get an error due to i == N for some choices of N
+                if i < N:
+                    dirs[i,:] = r*np.sin(theta)*np.cos(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(theta)
+                    i += 1
 
         return dirs
     else:
         print("Function implemented only for 2 and 3 dimensions")
 
-def plot_pole_directions(directions, titleplot = 'title', parallels=8, meridians=12, save_fig=False, dst = './', filename = 'sphere'):
+def plot_pole_directions(directions, titleplot = 'title', parallels=8, meridians=12, ms=160, save_fig=False, dst = './', filename = 'sphere'):
 
     if directions.shape[1] != 3:
         print('Function implemented only for 3 dimensions')
@@ -101,7 +112,7 @@ def plot_pole_directions(directions, titleplot = 'title', parallels=8, meridians
     ax.plot(axlen, zeros, zeros, c='r', lw=4, alpha=0.5)
     ax.plot(zeros, axlen, zeros, c='b', lw=4, alpha=0.5)
     ax.plot(zeros, zeros, axlen, c='g', lw=4, alpha=0.5)
-    ax.scatter(directions[:,0],directions[:,1],directions[:,2], marker='^', s=160, c='m')
+    ax.scatter(directions[:,0],directions[:,1],directions[:,2], marker='^', s=ms, c='m')
 
     for i in range(parallels*2-1):
         ax.plot(pdirections[(i*meridians + 1):((i+1)*meridians + 1),0],
